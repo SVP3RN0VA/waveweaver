@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Wave Weaver Arena v4 - Weaker Explosives</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { background: #222; margin:0; overflow:hidden; }
+    #gameCanvas { background: #333; display:block; margin: auto; border:3px solid #111; }
+    #ui { position: absolute; left: 50%; top: 20px; transform: translateX(-50%); color: #fff; font-family: Arial, sans-serif; text-align: center; width: 98vw; }
+    .stat { margin: 4px 10px; display: inline-block; }
+    .heal { color: #4ef542; font-weight: bold; }
+    .message { color: #fd0; font-size: 1.1em; margin-top: 8px; }
+    .btn { background: #444; color: #fff; border:none; padding:8px 16px; font-size:1em; cursor:pointer; margin-top:12px;}
+    .btn:hover { background:#666; }
+    .instructions {
+      margin-top: 10px;
+      color: #fff;
+      font-size: 1.15em;
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background: #222c;
+      padding: 8px 0;
+      border-radius: 12px;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    #startOverlay {
+      position:fixed;
+      left:0;top:0;right:0;bottom:0;
+      background:rgba(34,34,34,0.95);
+      z-index:10;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      font-family:Arial,sans-serif;
+      color:#fff;
+      transition:opacity 0.2s;
+    }
+    #startOverlay h1 {
+      font-size:3em;
+      margin-bottom:0.3em;
+      color:#4ef542;
+      text-shadow:0 0 18px #222;
+    }
+    #startOverlay .desc {
+      font-size:1.3em;
+      margin-bottom:2em;
+      color:#fff;
+      text-shadow:0 0 6px #222;
+    }
+    #startOverlay .btn {
+      font-size:1.3em;
+      background:#2196f3;
+      color:#fff;
+      padding:14px 32px;
+      border-radius:8px;
+      margin-top:10px;
+      text-shadow:0 0 3px #222;
+      transition:background 0.2s;
+    }
+    #startOverlay .btn:hover {
+      background:#0d6fc2;
+    }
+    .bigmsg { font-size:2em; color:#f23; margin-top:24px; }
+    .winmsg { font-size:2em; color:#4ef542; margin-top:24px; }
+    #upgradeOverlay {
+      position:fixed;
+      left:0;top:0;right:0;bottom:0;
+      background:rgba(34,34,34,0.95);
+      z-index:20;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      flex-direction:column;
+      font-family:Arial,sans-serif;
+      color:#fff;
+    }
+    #upgradeOverlay .upg-title {
+      font-size:2em;
+      margin-bottom:0.6em;
+      color:#4ef542;
+      text-shadow:0 0 18px #222;
+    }
+    #upgradeOverlay .upg-btn {
+      background:#2196f3; color:#fff; border:none;
+      font-size:1.15em; margin:10px; padding:18px 32px;
+      border-radius:12px; cursor:pointer;
+      text-shadow:0 0 3px #222;
+      transition:background 0.2s, transform 0.15s;
+    }
+    #upgradeOverlay .upg-btn:hover {
+      background:#0d6fc2;
+      transform:scale(1.08);
+      box-shadow:0 0 18px #4ef542;
+    }
+    #waveOverlay {
+      position:fixed;
+      left:0;top:0;right:0;bottom:0;
+      background:rgba(34,34,34,0.86);
+      z-index:18;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      font-family:Arial,sans-serif;
+      color:#fff;
+      font-size:2em;
+      text-align:center;
+    }
+    @media (max-width: 900px) {
+      #gameCanvas { width: 99vw; height: 60vh; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas" width="900" height="600"></canvas>
+  <div id="ui"></div>
+  <div class="instructions">
+    <b>HOW TO PLAY:</b>
+    <br>Press <span style="color:#4ef542;">Spacebar</span> to start. &nbsp; Move: <b>WASD</b> or <b>Arrow Keys</b> &nbsp; Shoot: <b>Spacebar</b> or <b>Mouse Click</b>
+    <br>Each round: <span style="color:#f90">Enemy wave</span> then <span style="color:#FFD700">Boss fight</span>. Pick up green healing orbs!
+    <br>Survive all 10 rounds to win.
+  </div>
+  <div id="startOverlay">
+    <h1>Wave Weaver Arena v4</h1>
+    <div class="desc">
+      Press <b>Spacebar</b> to start the game.<br>
+      Survive 10 rounds of enemies and bosses.<br>
+      <br>
+      Move: <b>WASD or Arrow Keys</b> &nbsp; Shoot: <b>Spacebar</b> or <b>Mouse Click</b>
+    </div>
+    <div style="margin-top:2em; font-size:1em; color:#aaa;">Share this page link: anyone, anywhere can play instantly.</div>
+  </div>
+  <div id="upgradeOverlay"></div>
+  <div id="waveOverlay"></div>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    let keys = {}, mouse = {x:W/2, y:H/2, down:false, space:false};
+    let game = null;
+    let gameStarted = false;
+
+    // --- Debuffed Weapon Types & Data (explosive dealt less damage) ---
+    const weaponTypes = [
+      {
+        name: "Fast Shot",
+        desc: "Single bullet, low damage, high speed.",
+        shoot: function(hero, projectiles) {
+          let angle = Math.atan2(mouse.y-hero.y, mouse.x-hero.x);
+          let speed = 7 + hero.weapon*0.25;
+          let dmg = 3.5 + hero.weapon*0.8;
+          projectiles.push(new Projectile(hero.x, hero.y, angle, speed, dmg, hero.weapon));
+          hero.cooldown = 7;
+        }
+      },
+      {
+        name: "Spread Shot",
+        desc: "Shoots 5 bullets in an arc.",
+        shoot: function(hero, projectiles) {
+          let angle = Math.atan2(mouse.y-hero.y, mouse.x-hero.x);
+          let spread = 0.5;
+          for(let i=0;i<5;i++) {
+            let a = angle-spread/2+spread*i/4;
+            projectiles.push(new Projectile(hero.x, hero.y, a, 5.7, 3+hero.weapon*0.8, hero.weapon));
+          }
+          hero.cooldown = 9;
+        }
+      },
+      {
+        name: "Explosive",
+        desc: "Exploding bullet, low damage.",
+        shoot: function(hero, projectiles) {
+          let angle = Math.atan2(mouse.y-hero.y, mouse.x-hero.x);
+          projectiles.push(new ExplosiveProjectile(hero.x, hero.y, angle, 4.9, 3+hero.weapon*0.4, hero.weapon)); // LESS DAMAGE!
+          hero.cooldown = 13;
+        }
+      },
+      {
+        name: "Super Shot",
+        desc: "Multiple bullets, high damage.",
+        shoot: function(hero, projectiles) {
+          let angle = Math.atan2(mouse.y-hero.y, mouse.x-hero.x);
+          let shots = 2 + Math.floor((hero.weapon-4)/2);
+          let spread = 0.38*shots;
+          for(let i=0;i<shots;i++) {
+            let a = angle-spread/2+spread*i/(shots-1||1);
+            let speed = 6.3;
+            let dmg = 5+hero.weapon*0.9;
+            projectiles.push(new Projectile(hero.x, hero.y, a, speed, dmg, hero.weapon));
+          }
+          hero.cooldown = 9;
+        }
+      }
+    ];
+
+    function rand(a,b) { return a + Math.random()*(b-a);}
+    function dist(ax,ay,bx,by) { return Math.hypot(ax-bx,ay-by); }
+    function clamp(val,min,max) { return Math.max(min,Math.min(max,val)); }
+
+    class Hero {
+      constructor() {
+        this.x = W/2; this.y = H/2;
+        this.r = 22; this.hp = 100; this.maxHp = 100;
+        this.weapon = 1;
+        this.weaponType = 0;
+        this.cooldown = 0;
+        this.healTimeout = 0;
+        this.invuln = 0;
+        this.color = "#2196f3";
+        this.alive = true;
+        this.speed = 3.2;
+      }
+      draw() {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, 2*Math.PI);
+        ctx.fillStyle = this.invuln > 0 ? "#88f" : this.color;
+        ctx.shadowColor = "#fff";
+        ctx.shadowBlur = 10;
+        ctx.globalAlpha = this.invuln > 0 ? 0.7 : 1;
+        ctx.fill();
+        ctx.restore();
+        ctx.save();
+        ctx.translate(this.x, this.y);
+        let lookAngle = Math.atan2(mouse.y-this.y, mouse.x-this.x);
+        ctx.rotate(lookAngle);
+        ctx.fillStyle = "#fff";
+        ctx.fillRect(10, -6, 10, 12);
+        ctx.restore();
+        ctx.fillStyle = "#222";
+        ctx.fillRect(this.x-25, this.y-35, 50,7);
+        ctx.fillStyle = "#0f0";
+        ctx.fillRect(this.x-25, this.y-35, 50*this.hp/this.maxHp,7);
+        ctx.fillStyle = "#222";
+        ctx.fillRect(this.x-25, this.y-26, 50,5);
+        ctx.fillStyle = "#2196f3";
+        let maxCD = this.getMaxCooldown();
+        let cdRatio = 1 - (this.cooldown / maxCD);
+        ctx.fillRect(this.x-25, this.y-26, 50*cdRatio,5);
+      }
+      getMaxCooldown() {
+        switch(this.weaponType) {
+          case 0: return 7;
+          case 1: return 9;
+          case 2: return 13;
+          case 3: return 9;
+        }
+        return 9;
+      }
+      move() {
+        let dx=0, dy=0;
+        if(keys["w"]||keys["ArrowUp"]) dy -= 1;
+        if(keys["s"]||keys["ArrowDown"]) dy += 1;
+        if(keys["a"]||keys["ArrowLeft"]) dx -= 1;
+        if(keys["d"]||keys["ArrowRight"]) dx += 1;
+        if(dx||dy) {
+          let mag = Math.hypot(dx,dy);
+          this.x = clamp(this.x+dx/((mag)||1)*this.speed, this.r,W-this.r);
+          this.y = clamp(this.y+dy/((mag)||1)*this.speed, this.r,H-this.r);
+        }
+      }
+      shoot(projectiles) {
+        weaponTypes[this.weaponType].shoot(this, projectiles);
+      }
+      update() {
+        if(this.cooldown>0) this.cooldown--;
+        if(this.healTimeout>0) this.healTimeout--;
+        if(this.invuln>0) this.invuln--;
+        if(this.hp<=0) this.alive = false;
+      }
+      heal(amount) {
+        this.hp = clamp(this.hp+amount,0,this.maxHp);
+        this.healTimeout = 18;
+      }
+      takeDamage(amount) {
+        if(this.invuln>0) return;
+        this.hp -= amount;
+        this.invuln = 8;
+      }
+    }
+
+    class Enemy {
+      constructor(x,y,round) {
+        this.x=x; this.y=y;
+        this.r = 18 + Math.floor(round/3)*3;
+        this.hp = 28+round*13;
+        this.maxHp = this.hp;
+        this.speed = 1.4+round*0.07;
+        this.damage = (10+round*2)*0.5;
+        this.color = `hsl(${rand(0,360)},70%,55%)`;
+        this.anim = 0;
+      }
+      draw() {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0, 2*Math.PI);
+        ctx.fillStyle = this.color;
+        ctx.shadowColor = "#f00";
+        ctx.shadowBlur = 10;
+        ctx.globalAlpha = 0.98;
+        ctx.fill();
+        ctx.restore();
+        ctx.beginPath();
+        ctx.arc(this.x-6, this.y-5, 4,0,2*Math.PI);
+        ctx.arc(this.x+6, this.y-5, 4,0,2*Math.PI);
+        ctx.fillStyle="#fff";
+        ctx.fill();
+        ctx.fillStyle="#c00";
+        ctx.fillRect(this.x-16, this.y-32, 32,5);
+        ctx.fillStyle="#0f0";
+        ctx.fillRect(this.x-16, this.y-32, 32*this.hp/this.maxHp,5);
+      }
+      move(hero) {
+        let dx = hero.x-this.x, dy = hero.y-this.y;
+        let dista = Math.hypot(dx,dy);
+        if(dista>0) {
+          this.x += dx/dista*this.speed;
+          this.y += dy/dista*this.speed;
+        }
+        this.anim+=0.18;
+      }
+    }
+
+    class Boss {
+      constructor(round) {
+        this.x=W-60; this.y=rand(60,H-60);
+        this.r = 44 + round*2;
+        this.hp = 300+round*120;
+        this.maxHp = this.hp;
+        this.speed = 1.1+round*0.07;
+        this.damage = Math.max(22+round*4, 0.25 * (new Hero()).maxHp);
+        this.cooldown = 0;
+        this.color = "#FFD700";
+        this.anim = 0;
+        this.round = round;
+      }
+      draw() {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0,2*Math.PI);
+        ctx.fillStyle = this.color;
+        ctx.shadowColor = "#fff";
+        ctx.shadowBlur = 18;
+        ctx.globalAlpha = 0.99;
+        ctx.fill();
+        ctx.restore();
+        ctx.beginPath();
+        ctx.arc(this.x-13, this.y-14, 8,0,2*Math.PI);
+        ctx.arc(this.x+13, this.y-14, 8,0,2*Math.PI);
+        ctx.fillStyle="#e00";
+        ctx.fill();
+        ctx.save();
+        ctx.translate(this.x, this.y-this.r-16);
+        ctx.fillStyle="#fb3";
+        ctx.beginPath();
+        ctx.moveTo(-18,0); ctx.lineTo(0,-16); ctx.lineTo(18,0); ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle="#c00"; ctx.fillRect(this.x-38, this.y-this.r-38, 76,7);
+        ctx.fillStyle="#0f0"; ctx.fillRect(this.x-38, this.y-this.r-38, 76*this.hp/this.maxHp,7);
+      }
+      move(hero) {
+        let dx=hero.x-this.x, dy=hero.y-this.y;
+        let dista = Math.hypot(dx,dy);
+        if(dista>0) {
+          this.x += dx/dista*this.speed;
+          this.y += dy/dista*this.speed;
+        }
+        this.anim+=0.1;
+      }
+      attack(hero,enemies) {
+        if(this.cooldown<=0) {
+          for(let i=0;i<2+Math.floor(this.round/3);i++) {
+            let ex = W-60, ey = rand(60,H-60);
+            enemies.push(new Enemy(ex, ey, this.round));
+          }
+          this.cooldown = clamp(120-this.round*11,50,120);
+        } else this.cooldown--;
+      }
+    }
+
+    class Projectile {
+      constructor(x,y,angle,speed,damage,level) {
+        this.x=x; this.y=y;
+        this.angle=angle;
+        this.speed=speed;
+        this.damage=damage;
+        this.r=8+level;
+        this.color = ["#f93","#fa3","#f36","#3ff","#6f3","#f3f","#fff"][level%7];
+      }
+      move() {
+        this.x += Math.cos(this.angle)*this.speed;
+        this.y += Math.sin(this.angle)*this.speed;
+      }
+      draw() {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r, 0,2*Math.PI);
+        ctx.fillStyle = this.color;
+        ctx.shadowBlur = 12;
+        ctx.shadowColor = this.color;
+        ctx.globalAlpha = 0.95;
+        ctx.fill();
+        ctx.restore();
+      }
+      offScreen() {
+        return this.x<-30||this.x>W+30||this.y<-30||this.y>H+30;
+      }
+    }
+
+    class ExplosiveProjectile extends Projectile {
+      constructor(x,y,angle,speed,damage,level) {
+        super(x,y,angle,speed,damage,level);
+        this.exploded = false; this.explodeTimer = 0;
+      }
+      move() {
+        if(this.exploded) { this.explodeTimer++; }
+        else { super.move(); }
+      }
+      draw() {
+        if(!this.exploded) super.draw();
+        else {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(this.x, this.y, 34, 0, 2*Math.PI);
+          ctx.fillStyle = "rgba(255,200,50,0.33)";
+          ctx.fill();
+          ctx.restore();
+        }
+      }
+      explode(enemies, boss) {
+        if(this.exploded) return;
+        this.exploded = true; this.explodeTimer = 0;
+        for(let i=enemies.length-1;i>=0;i--) {
+          if(dist(this.x,this.y,enemies[i].x,enemies[i].y)<34) {
+            enemies[i].hp -= this.damage;
+            if(enemies[i].hp<=0) enemies.splice(i,1);
+          }
+        }
+        if(boss && dist(this.x,this.y,boss.x,boss.y)<34) boss.hp -= this.damage;
+      }
+      offScreen() {
+        return (!this.exploded && (this.x<-30||this.x>W+30||this.y<-30||this.y>H+30)) || (this.exploded && this.explodeTimer>10);
+      }
+    }
+
+    class Pickup {
+      constructor(x,y,type,amount) {
+        this.x=x; this.y=y; this.r=16; this.type=type; this.amount=amount;
+        this.anim=0;
+      }
+      draw() {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.r+Math.sin(this.anim)*2, 0,2*Math.PI);
+        ctx.fillStyle = this.type=="heal"?"#2f7":"#39f";
+        ctx.shadowBlur = 9;
+        ctx.shadowColor = "#fff";
+        ctx.globalAlpha = 0.93;
+        ctx.fill();
+        ctx.restore();
+        ctx.font="16px Arial";
+        ctx.fillStyle="#fff";
+        ctx.fillText(this.type=="heal"?"+HP":"+?", this.x-15, this.y+5);
+        this.anim+=0.12;
+      }
+    }
+
+    function newGame() {
+      return {
+        hero: new Hero(),
+        enemies: [],
+        boss: null,
+        projectiles: [],
+        pickups: [],
+        round: 1,
+        phase: "enemies",
+        message: "Round 1: Enemy Wave!",
+        over: false,
+        win: false,
+        frame: 0,
+        score: 0,
+        upgrading: false,
+        waveCooldown: 0
+      };
+    }
+
+    function showUpgradeOverlay() {
+      const upg = document.getElementById('upgradeOverlay');
+      let weaponBtns = weaponTypes.map((wpn, idx) => `<button class="upg-btn" onclick="chooseWeapon(${idx})">${wpn.name}<br><span style="font-size:0.93em;">${wpn.desc}</span></button>`).join('');
+      upg.innerHTML = `<div class="upg-title">Choose Your Weapon for Next Round!</div>${weaponBtns}`;
+      upg.style.display = 'flex';
+    }
+    window.chooseWeapon = function(idx) {
+      document.getElementById('upgradeOverlay').style.display = 'none';
+      game.hero.weaponType = idx;
+      game.hero.weapon++;
+      game.hero.heal(40+game.round*10);
+      game.round++;
+      game.phase="waveCooldown";
+      game.enemies=[]; game.boss=null; game.projectiles=[]; game.pickups=[];
+      game.message = `Weapon chosen! Healing + Next Round (${game.round})`;
+      game.frame = 0;
+      game.upgrading = false;
+      game.waveCooldown = 300; // 10 seconds at 30fps
+      document.getElementById('waveOverlay').style.display = 'flex';
+      gameLoop();
+    };
+
+    function updateGame() {
+      let g = game;
+      if(g.over||g.win||g.upgrading) return;
+
+      if(g.phase=="waveCooldown") {
+        document.getElementById('waveOverlay').style.display = 'flex';
+        document.getElementById('waveOverlay').innerHTML = `<div>Next wave starts in <span style="color:#FFD700">${Math.ceil(g.waveCooldown/30)}</span>...</div>`;
+        g.waveCooldown--;
+        if(g.waveCooldown <= 0) {
+          document.getElementById('waveOverlay').style.display = 'none';
+          g.phase = "enemies";
+          g.frame = 0;
+        }
+        return;
+      }
+
+      g.frame++;
+      g.hero.move();
+      g.hero.update();
+
+      // Always spawn enemies on far right
+      if(g.phase=="enemies"&&g.enemies.length==0&&g.frame>20) {
+        for(let i=0;i<5+g.round*2;i++) {
+          let ex = W-60;
+          let ey = rand(60,H-60);
+          g.enemies.push(new Enemy(ex, ey, g.round));
+        }
+        g.message = `Round ${g.round}: Enemy Wave!`;
+      }
+      if(g.phase=="boss"&&g.boss==null) {
+        g.boss = new Boss(g.round);
+        g.message = `Round ${g.round}: Boss Fight!`;
+      }
+      for(let i=g.projectiles.length-1;i>=0;i--) {
+        let p = g.projectiles[i];
+        if(p instanceof ExplosiveProjectile && !p.exploded) {
+          for(let j=g.enemies.length-1;j>=0;j--) {
+            if(dist(p.x,p.y,g.enemies[j].x,g.enemies[j].y)<p.r+g.enemies[j].r) {
+              p.explode(g.enemies, g.boss); break;
+            }
+          }
+          if(g.boss && dist(p.x,p.y,g.boss.x,g.boss.y)<p.r+g.boss.r) p.explode(g.enemies, g.boss);
+        }
+        p.move();
+        if(p.offScreen()) g.projectiles.splice(i,1);
+      }
+      for(let e of g.enemies) e.move(g.hero);
+      if(g.boss) { g.boss.move(g.hero); g.boss.attack(g.hero,g.enemies); }
+      for(let i=g.pickups.length-1;i>=0;i--) {
+        let pk = g.pickups[i];
+        if(dist(pk.x,pk.y,g.hero.x,g.hero.y)<g.hero.r+pk.r) {
+          if(pk.type=="heal") {
+            g.hero.heal(pk.amount);
+            g.message = `Healed +${pk.amount}HP!`;
+          }
+          g.pickups.splice(i,1);
+        }
+      }
+      for(let i=g.enemies.length-1;i>=0;i--) {
+        let e=g.enemies[i];
+        if(dist(e.x,e.y,g.hero.x,g.hero.y)<e.r+g.hero.r) {
+          game.hero.takeDamage(e.damage);
+        }
+      }
+      for(let i=g.projectiles.length-1;i>=0;i--) {
+        let p = g.projectiles[i];
+        for(let j=g.enemies.length-1;j>=0;j--) {
+          let e = g.enemies[j];
+          if(dist(p.x,p.y,e.x,e.y)<p.r+e.r) {
+            e.hp -= p.damage;
+            if(e.hp<=0) {
+              g.score+=10+g.round*2;
+              if(Math.random()<0.18) {
+                g.pickups.push(new Pickup(e.x, e.y, "heal", 24+g.round*6));
+              }
+              g.enemies.splice(j,1);
+            }
+            if(!(p instanceof ExplosiveProjectile)) g.projectiles.splice(i,1); break;
+          }
+        }
+      }
+      if(g.boss) {
+        for(let i=g.projectiles.length-1;i>=0;i--) {
+          let p = g.projectiles[i];
+          if(dist(p.x,p.y,g.boss.x,g.boss.y)<p.r+g.boss.r) {
+            g.boss.hp -= p.damage;
+            if(!(p instanceof ExplosiveProjectile)) g.projectiles.splice(i,1);
+          }
+        }
+      }
+      if(g.boss&&dist(g.boss.x,g.boss.y,g.hero.x,g.hero.y)<g.boss.r+g.hero.r) {
+        game.hero.takeDamage(g.boss.damage);
+      }
+      if(g.phase=="enemies"&&g.enemies.length==0) g.phase="boss";
+      if(g.phase=="boss"&&g.boss&&g.boss.hp<=0) {
+        g.boss = null; g.phase = "done";
+      }
+      if(g.phase=="done") {
+        g.upgrading = true;
+        showUpgradeOverlay();
+      }
+      if(!g.hero.alive) { g.over=true; }
+    }
+
+    function drawGame() {
+      ctx.clearRect(0,0,W,H);
+      let g=game;
+      ctx.strokeStyle="#444";
+      ctx.lineWidth=4;
+      ctx.strokeRect(0,0,W,H);
+
+      for(let pk of g.pickups) pk.draw();
+      for(let p of g.projectiles) p.draw();
+      for(let e of g.enemies) e.draw();
+      if(g.boss) g.boss.draw();
+      g.hero.draw();
+
+      let ui = document.getElementById('ui');
+      ui.innerHTML = `
+        <span class="stat">HP: <b>${g.hero.hp}</b>/${g.hero.maxHp}</span>
+        <span class="stat">Weapon: <b>${weaponTypes[g.hero.weaponType].name}</b> (${g.hero.weapon})</span>
+        <span class="stat">Round: <b>${g.round}</b>/10</span>
+        <span class="stat">Score: <b>${g.score}</b></span>
+        ${g.hero.healTimeout>0 ? '<span class="heal">+HP!</span>' : ''}
+        <div class="message">${g.message||''}</div>
+        ${g.over ? `<div style="font-size:2em;color:#f23;">GAME OVER<br>
+        <button class="btn" onclick="restartGame()">Restart</button></div>` : ''}
+        ${g.win ? `<div style="font-size:2em;color:#4ef542;">YOU WIN!<br>
+        <button class="btn" onclick="restartGame()">Play Again</button></div>` : ''}
+      `;
+    }
+
+    function gameLoop() {
+      updateGame();
+      drawGame();
+      if(!game.over&&!game.win) requestAnimationFrame(gameLoop);
+    }
+
+    function restartGame() {
+      game = newGame();
+      gameLoop();
+      gameStarted = true;
+      document.getElementById('startOverlay').style.display = 'none';
+      document.getElementById('upgradeOverlay').style.display = 'none';
+      document.getElementById('waveOverlay').style.display = 'none';
+    }
+
+    window.addEventListener("keydown",e=>{
+      keys[e.key.toLowerCase()]=true;
+      if(e.code === "Space") mouse.space = true;
+      if(!gameStarted && e.code === "Space") { restartGame(); }
+    });
+    window.addEventListener("keyup",e=>{
+      keys[e.key.toLowerCase()]=false;
+      if(e.code === "Space") mouse.space = false;
+    });
+    canvas.addEventListener("mousemove",e=>{
+      let rect = canvas.getBoundingClientRect();
+      mouse.x = e.clientX - rect.left;
+      mouse.y = e.clientY - rect.top;
+    });
+    window.addEventListener("mousedown",e=>{ mouse.down=true; });
+    window.addEventListener("mouseup",e=>{ mouse.down=false; });
+
+    setInterval(()=>{
+      if(game && (mouse.down || mouse.space) && !game.over && !game.win && !game.upgrading && game.phase !== "waveCooldown") {
+        if (game.hero.cooldown <= 0) game.hero.shoot(game.projectiles);
+      }
+    }, 30);
+
+    // Start game screen shown by default
+  </script>
+</body>
+</html>
